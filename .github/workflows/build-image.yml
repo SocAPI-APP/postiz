@@ -37,6 +37,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile.dev
           push: true
           tags: |
             ghcr.io/socapi-app/postiz:${{ inputs.upstream_tag }}-socapi
