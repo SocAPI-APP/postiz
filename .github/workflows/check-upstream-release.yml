@@ -164,8 +164,22 @@ jobs:
           SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
         run: |
           set -euo pipefail
-          message="✅ Postiz ${UPSTREAM_TAG} a fost integrat cu succes în SocAPI.\n\nVersiune SocAPI:\n${SOCAPI_TAG}\n\nImagine:\nghcr.io/socapi-app/postiz:${SOCAPI_TAG}"
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode "text=${message}"
+
+          message=$(cat <<EOF
+          ✅ Postiz ${UPSTREAM_TAG} a fost integrat cu succes în SocAPI.
+
+          Versiune SocAPI:
+          ${SOCAPI_TAG}
+
+          Imagine:
+          ghcr.io/socapi-app/postiz:${SOCAPI_TAG}
+          EOF
+          )
+
+          curl -fsS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${message}"
 
   notify-failure:
     needs: [check, sync, build, accept]
