@@ -63,27 +63,32 @@ jobs:
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${MESSAGE}"
 
-      - name: Mark upstream version as processed
+      - name: Merge sync branch into main and mark version
         if: success()
         env:
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
         run: |
+          set -euo pipefail
+
           git config user.name "SocAPI Upstream Bot"
           git config user.email "actions@users.noreply.github.com"
 
+          SYNC_BRANCH="sync/upstream-${UPSTREAM_TAG}"
+
+          git fetch origin main "${SYNC_BRANCH}"
+
           git checkout main
-          git pull origin main
+          git pull --ff-only origin main
+
+          git merge --no-edit "origin/${SYNC_BRANCH}"
 
           echo "${UPSTREAM_TAG}" > .socapi-upstream-version
-
           git add .socapi-upstream-version
 
-          if git diff --cached --quiet; then
-            echo "Versiunea este deja marcată ca procesată."
-            exit 0
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: mark ${UPSTREAM_TAG} as processed"
           fi
 
-          git commit -m "ci: mark ${UPSTREAM_TAG} as processed"
           git push origin main
 
       - name: Notify Telegram - build failed
