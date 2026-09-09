@@ -1,0 +1,119 @@
+name: Create SocAPI release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: create-socapi-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.version.outputs.source_sha }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Calculate next SocAPI revision
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < .socapi-upstream-version)"
+          if [ -z "$base" ]; then
+            echo '.socapi-upstream-version is empty' >&2
+            exit 1
+          fi
+          git fetch --tags --force origin
+          highest=0
+          while IFS= read -r tag; do
+            if [[ "$tag" =~ ^${base}-socapi-v([0-9]+)$ ]]; then
+              revision=$((10#${BASH_REMATCH[1]}))
+              if (( revision > highest )); then highest=$revision; fi
+            fi
+          done < <(git tag -l "${base}-socapi-v*")
+          next=$((highest + 1))
+          version="${base}-socapi-v${next}"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git show-ref --tags --verify --quiet "refs/tags/$version"; then
+            echo "SocAPI tag already exists: $version" >&2
+            exit 1
+          fi
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build-image.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.source_sha }}
+      image_tag: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  publish:
+    needs: [prepare, build]
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tag exact built commit and promote latest
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          git clone --no-tags "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
+            echo 'main no longer contains the commit that was built' >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "SocAPI tag already exists: $VERSION" >&2
+            exit 1
+          fi
+          git tag "$VERSION" "$SOURCE_SHA"
+          git push origin "$VERSION"
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "ghcr.io/socapi-app/postiz:${VERSION}"
+          docker tag "ghcr.io/socapi-app/postiz:${VERSION}" ghcr.io/socapi-app/postiz:latest
+          docker push ghcr.io/socapi-app/postiz:latest
+      - name: Notify Telegram - success
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          message="✅ O nouă versiune SocAPI a fost construită și publicată cu succes.\n\nVersiune:\n${VERSION}\n\nImagine:\nghcr.io/socapi-app/postiz:${VERSION}"
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode "text=${message}"
+
+  notify-failure:
+    needs: [prepare, build, publish]
+    if: always() && (needs.build.result != 'success' || needs.publish.result != 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Telegram - failure
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILD_RESULT" != success ]; then
+            detail="Build-ul pentru ${VERSION:-versiunea calculată} a eșuat. Tag-ul Git nu a fost creat."
+          else
+            detail="Publicarea versiunii ${VERSION} a eșuat după build. Verificarea manuală este necesară."
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode "text=❌ ${detail}"

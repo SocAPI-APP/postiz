@@ -7,136 +7,189 @@ on:
 
 permissions:
   contents: write
-  actions: write
+  packages: write
 
 jobs:
   check:
     runs-on: ubuntu-latest
-
+    outputs:
+      new_release: ${{ steps.compare.outputs.new_release }}
+      upstream_tag: ${{ steps.upstream.outputs.tag }}
+      current_tag: ${{ steps.current.outputs.tag }}
+      socapi_tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Checkout fork
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
-
       - name: Get latest upstream release
         id: upstream
         shell: bash
         run: |
           set -euo pipefail
-
-          API_URL="https://api.github.com/repos/gitroomhq/postiz-app/releases/latest"
-
-          TAG="$(
-            curl -fsSL \
-              -H "Accept: application/vnd.github+json" \
-              "$API_URL" \
-            | jq -r '.tag_name'
-          )"
-
-          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "Could not determine latest upstream release"
+          tag="$(curl -fsSL -H 'Accept: application/vnd.github+json' https://api.github.com/repos/gitroomhq/postiz-app/releases/latest | jq -r '.tag_name')"
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo 'Could not determine latest upstream release' >&2
             exit 1
           fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Latest upstream release: $TAG"
-
-      - name: Read last processed release
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Read accepted upstream version
         id: current
         shell: bash
         run: |
           set -euo pipefail
-
-          if [ -f .socapi-upstream-version ]; then
-            CURRENT="$(cat .socapi-upstream-version)"
-          else
-            CURRENT=""
-          fi
-
-          echo "tag=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "Last processed release: ${CURRENT:-none}"
-
+          current=""
+          [ -f .socapi-upstream-version ] && current="$(tr -d '[:space:]' < .socapi-upstream-version)"
+          echo "tag=$current" >> "$GITHUB_OUTPUT"
       - name: Compare releases
+        id: compare
         shell: bash
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          CURRENT_TAG: ${{ steps.current.outputs.tag }}
         run: |
           set -euo pipefail
-
-          UPSTREAM="${{ steps.upstream.outputs.tag }}"
-          CURRENT="${{ steps.current.outputs.tag }}"
-
-          echo "Current:  $CURRENT"
-          echo "Upstream: $UPSTREAM"
-
-          if [ "$UPSTREAM" = "$CURRENT" ]; then
-            echo "No new upstream release."
+          if [ "$UPSTREAM_TAG" = "$CURRENT_TAG" ]; then
+            echo 'new_release=false' >> "$GITHUB_OUTPUT"
           else
-            echo "New upstream release detected: $UPSTREAM"
+            echo 'new_release=true' >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Notify Telegram - new release
-        if: steps.upstream.outputs.tag != steps.current.outputs.tag
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
-        run: |
-          curl -fsS -X POST \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=🆕 A fost detectată o versiune nouă Postiz: ${UPSTREAM_TAG}"
-
-
-      - name: Sync new upstream release
-        id: sync
-        if: steps.upstream.outputs.tag != steps.current.outputs.tag
+      - name: Calculate and verify release version
+        id: version
+        if: steps.compare.outputs.new_release == 'true'
         shell: bash
         env:
           UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
         run: |
           set -euo pipefail
-
-          git config user.name "SocAPI Upstream Bot"
-          git config user.email "actions@users.noreply.github.com"
-
-          git remote add upstream https://github.com/gitroomhq/postiz-app.git || true
-          git fetch upstream --tags
-
-          BRANCH="sync/upstream-${UPSTREAM_TAG}"
-
-          git checkout -b "$BRANCH"
-
-          if ! git merge --no-edit "$UPSTREAM_TAG"; then
-            git merge --abort || true
-            echo "merge_failed=true" >> "$GITHUB_OUTPUT"
+          git fetch --tags --force origin
+          tag="${UPSTREAM_TAG}-socapi-v1"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git show-ref --tags --verify --quiet "refs/tags/$tag"; then
+            echo "SocAPI tag already exists: $tag" >&2
             exit 1
           fi
 
-          git push origin "$BRANCH"
-
-          echo "merge_failed=false" >> "$GITHUB_OUTPUT"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-
-
-      - name: Trigger Docker build
-        if: success() && steps.upstream.outputs.tag != steps.current.outputs.tag
+  sync:
+    needs: check
+    if: needs.check.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.sync.outputs.branch }}
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Merge upstream into isolated sync branch
+        id: sync
+        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
         run: |
-          gh workflow run build-image.yml \
-            --repo "${GITHUB_REPOSITORY}" \
-            -f upstream_tag="${UPSTREAM_TAG}"
+          set -euo pipefail
+          git config user.name 'SocAPI Upstream Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git remote add upstream https://github.com/gitroomhq/postiz-app.git
+          git fetch origin main
+          git fetch upstream --tags
+          branch="sync/upstream-${UPSTREAM_TAG}"
+          git fetch origin "$branch" || true
+          git checkout -B "$branch" origin/main
+          if ! git merge --no-edit "$UPSTREAM_TAG"; then
+            git merge --abort || true
+            echo "Merge failed for $UPSTREAM_TAG" >&2
+            exit 1
+          fi
+          printf '%s\n' "$UPSTREAM_TAG" > .socapi-upstream-version
+          git add .socapi-upstream-version
+          git commit -m "ci: accept Postiz ${UPSTREAM_TAG}"
+          git push --force-with-lease origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Telegram - merge failed
-        if: failure() && steps.upstream.outputs.tag != steps.current.outputs.tag
+  build:
+    needs: [check, sync]
+    if: needs.check.outputs.new_release == 'true' && needs.sync.result == 'success'
+    uses: ./.github/workflows/build-image.yml
+    with:
+      source_ref: ${{ needs.sync.outputs.branch }}
+      image_tag: ${{ needs.check.outputs.socapi_tag }}
+    secrets: inherit
+
+  accept:
+    needs: [check, sync, build]
+    if: needs.check.outputs.new_release == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge tested sync branch into main and tag it
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
+        run: |
+          set -euo pipefail
+          git clone --no-tags "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git config user.name 'SocAPI Upstream Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git fetch origin main "sync/upstream-${UPSTREAM_TAG}"
+          git checkout -B main origin/main
+          git merge --ff-only "origin/sync/upstream-${UPSTREAM_TAG}"
+          git push origin main
+          if git ls-remote --exit-code --tags origin "refs/tags/$SOCAPI_TAG" >/dev/null 2>&1; then
+            echo "SocAPI tag already exists: $SOCAPI_TAG" >&2
+            exit 1
+          fi
+          git tag "$SOCAPI_TAG" HEAD
+          git push origin "$SOCAPI_TAG"
+      - name: Promote accepted image to latest
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}"
+          docker tag "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}" ghcr.io/socapi-app/postiz:latest
+          docker push ghcr.io/socapi-app/postiz:latest
+      - name: Notify Telegram - success
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
         run: |
-          curl -fsS -X POST \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=❌ Merge-ul pentru Postiz ${UPSTREAM_TAG} a eșuat. Este necesară intervenție manuală."
+          set -euo pipefail
+          message="✅ Postiz ${UPSTREAM_TAG} a fost integrat cu succes în SocAPI.\n\nVersiune SocAPI:\n${SOCAPI_TAG}\n\nImagine:\nghcr.io/socapi-app/postiz:${SOCAPI_TAG}"
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode "text=${message}"
 
+  notify-failure:
+    needs: [check, sync, build, accept]
+    if: always() && needs.check.outputs.new_release == 'true' && (needs.sync.result != 'success' || needs.build.result != 'success' || needs.accept.result != 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Telegram - failure
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          SYNC_RESULT: ${{ needs.sync.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          if [ "$CHECK_RESULT" != success ]; then
+            detail="Versiunea SocAPI ${SOCAPI_TAG:-calculată} nu a putut fi rezervată. Tag-ul Git nu a fost creat."
+          elif [ "$SYNC_RESULT" != success ]; then
+            detail="Merge-ul pentru Postiz ${UPSTREAM_TAG} a eșuat. Main nu a fost modificat."
+          elif [ "$BUILD_RESULT" != success ]; then
+            detail="Build-ul pentru ${SOCAPI_TAG} a eșuat. Main și latest nu au fost modificate."
+          else
+            detail="Acceptarea versiunii ${SOCAPI_TAG} a eșuat. Verificarea manuală este necesară."
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode "text=❌ ${detail}"
