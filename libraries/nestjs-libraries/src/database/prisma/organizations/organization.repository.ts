@@ -522,4 +522,19 @@ export class OrganizationRepository {
       },
     });
   }
+
+  getAllowedOAuthRedirectUrls(orgId: string) {
+    return this._organization.model.organization.findUnique({
+      where: { id: orgId },
+      select: { allowedOAuthRedirectUrls: true },
+    });
+  }
+
+  updateAllowedOAuthRedirectUrls(orgId: string, urls: string[]) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { allowedOAuthRedirectUrls: urls },
+      select: { allowedOAuthRedirectUrls: true },
+    });
+  }
 }

@@ -17,7 +17,7 @@ import {
   CustomFileValidationPipe,
   getMaxSize,
 } from '@gitroom/nestjs-libraries/upload/custom.upload.validation';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiQuery, ApiTags } from '@nestjs/swagger';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
 import { Organization } from '@prisma/client';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
@@ -63,9 +63,14 @@ import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integration
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import { PostValidationException } from '@gitroom/backend/api/routes/posts.validation.exception';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { SuperAdminGuard } from '@gitroom/backend/services/auth/super.admin.guard';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
+import {
+  isAllowedRedirectUrl,
+  validateRedirectUrl,
+} from '@gitroom/helpers/utils/redirect.url';
 
 @ApiTags('Public API')
 @Controller('/public/v1')
@@ -79,7 +84,8 @@ export class PublicIntegrationsController {
     private _notificationService: NotificationService,
     private _integrationManager: IntegrationManager,
     private _refreshIntegrationService: RefreshIntegrationService,
-    private _usersService: UsersService
+    private _usersService: UsersService,
+    private _organizationService: OrganizationService
   ) {}
 
   @Post('/upload')
@@ -329,10 +335,17 @@ export class PublicIntegrationsController {
   }
 
   @Get('/social/:integration')
+  @ApiQuery({
+    name: 'redirectUrl',
+    required: false,
+    description:
+      'Optional absolute HTTP or HTTPS URL where the browser returns after a successful social connection.',
+  })
   @CheckPolicies([AuthorizationActions.Create, Sections.CHANNEL])
   async getIntegrationUrl(
     @Param('integration') integration: string,
     @Query('refresh') refresh: string,
+    @Query('redirectUrl') redirectUrl: string,
     @GetOrgFromRequest() org: Organization
   ) {
     Sentry.metrics.count('public_api-request', 1);
@@ -342,6 +355,29 @@ export class PublicIntegrationsController {
         .includes(integration)
     ) {
       throw new HttpException({ msg: 'Integration not allowed' }, 400);
+    }
+
+    const validatedRedirectUrl = redirectUrl
+      ? validateRedirectUrl(redirectUrl)
+      : undefined;
+    if (redirectUrl && !validatedRedirectUrl) {
+      throw new HttpException(
+        { msg: 'redirectUrl must be an absolute HTTP or HTTPS URL' },
+        400
+      );
+    }
+
+    if (redirectUrl) {
+      const configured =
+        await this._organizationService.getAllowedOAuthRedirectUrls(org.id);
+      if (
+        !isAllowedRedirectUrl(
+          redirectUrl,
+          configured?.allowedOAuthRedirectUrls || []
+        )
+      ) {
+        throw new HttpException({ msg: 'Redirect URL is not allowed' }, 400);
+      }
     }
 
     // A provider migrated via MIGRATE_PROVIDERS reconnects through its target
@@ -370,6 +406,15 @@ export class PublicIntegrationsController {
 
       if (refresh) {
         await ioRedis.set(`refresh:${state}`, refresh, 'EX', 3600);
+      }
+
+      if (validatedRedirectUrl) {
+        await ioRedis.set(
+          `redirect:${state}`,
+          validatedRedirectUrl,
+          'EX',
+          3600
+        );
       }
 
       await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);

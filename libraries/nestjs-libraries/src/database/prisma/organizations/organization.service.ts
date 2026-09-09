@@ -199,4 +199,15 @@ export class OrganizationService {
       shortlink
     );
   }
+
+  getAllowedOAuthRedirectUrls(orgId: string) {
+    return this._organizationRepository.getAllowedOAuthRedirectUrls(orgId);
+  }
+
+  updateAllowedOAuthRedirectUrls(orgId: string, urls: string[]) {
+    return this._organizationRepository.updateAllowedOAuthRedirectUrls(
+      orgId,
+      urls
+    );
+  }
 }
