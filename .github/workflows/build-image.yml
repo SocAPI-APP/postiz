@@ -42,3 +42,30 @@ jobs:
           tags: |
             ghcr.io/socapi-app/postiz:${{ inputs.upstream_tag }}-socapi
             ghcr.io/socapi-app/postiz:latest
+
+      - name: Notify Telegram - build success
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          curl -fsS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ Imaginea SocAPI pentru Postiz ${UPSTREAM_TAG} a fost construită și publicată cu succes.
+
+Imagine:
+ghcr.io/socapi-app/postiz:${UPSTREAM_TAG}-socapi"
+
+      - name: Notify Telegram - build failed
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          curl -fsS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=❌ Build-ul imaginii SocAPI pentru Postiz ${UPSTREAM_TAG} a eșuat."
