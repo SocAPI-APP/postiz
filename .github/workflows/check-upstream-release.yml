@@ -72,3 +72,27 @@ jobs:
           else
             echo "New upstream release detected: $UPSTREAM"
           fi
+
+      - name: Sync new upstream release
+        if: steps.upstream.outputs.tag != steps.current.outputs.tag
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "SocAPI Upstream Bot"
+          git config user.email "actions@users.noreply.github.com"
+
+          git remote add upstream https://github.com/gitroomhq/postiz-app.git || true
+          git fetch upstream --tags
+
+          BRANCH="sync/upstream-${UPSTREAM_TAG}"
+
+          git checkout -b "$BRANCH"
+
+          git merge --no-edit "$UPSTREAM_TAG"
+
+          git push origin "$BRANCH"
+
+          echo "Created sync branch: $BRANCH"
