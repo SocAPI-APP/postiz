@@ -73,7 +73,21 @@ jobs:
             echo "New upstream release detected: $UPSTREAM"
           fi
 
+      - name: Notify Telegram - new release
+        if: steps.upstream.outputs.tag != steps.current.outputs.tag
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          curl -fsS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=🆕 A fost detectată o versiune nouă Postiz: ${UPSTREAM_TAG}"
+
+
       - name: Sync new upstream release
+        id: sync
         if: steps.upstream.outputs.tag != steps.current.outputs.tag
         shell: bash
         env:
@@ -91,8 +105,25 @@ jobs:
 
           git checkout -b "$BRANCH"
 
-          git merge --no-edit "$UPSTREAM_TAG"
+          if ! git merge --no-edit "$UPSTREAM_TAG"; then
+            git merge --abort || true
+            echo "merge_failed=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
           git push origin "$BRANCH"
 
-          echo "Created sync branch: $BRANCH"
+          echo "merge_failed=false" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram - merge failed
+        if: failure() && steps.upstream.outputs.tag != steps.current.outputs.tag
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          curl -fsS -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=❌ Merge-ul pentru Postiz ${UPSTREAM_TAG} a eșuat. Este necesară intervenție manuală."
