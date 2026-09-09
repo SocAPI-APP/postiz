@@ -1,0 +1,74 @@
+name: Check upstream Postiz release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest upstream release
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          API_URL="https://api.github.com/repos/gitroomhq/postiz-app/releases/latest"
+
+          TAG="$(
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              "$API_URL" \
+            | jq -r '.tag_name'
+          )"
+
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "Could not determine latest upstream release"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest upstream release: $TAG"
+
+      - name: Read last processed release
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f .socapi-upstream-version ]; then
+            CURRENT="$(cat .socapi-upstream-version)"
+          else
+            CURRENT=""
+          fi
+
+          echo "tag=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Last processed release: ${CURRENT:-none}"
+
+      - name: Compare releases
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          UPSTREAM="${{ steps.upstream.outputs.tag }}"
+          CURRENT="${{ steps.current.outputs.tag }}"
+
+          echo "Current:  $CURRENT"
+          echo "Upstream: $UPSTREAM"
+
+          if [ "$UPSTREAM" = "$CURRENT" ]; then
+            echo "No new upstream release."
+          else
+            echo "New upstream release detected: $UPSTREAM"
+          fi
