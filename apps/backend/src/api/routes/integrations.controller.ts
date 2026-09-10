@@ -204,6 +204,7 @@ export class IntegrationsController {
     @GetOrgFromRequest() org: Organization
   ) {
     if (
+      (!refresh && !this._integrationManager.isEnabledProvider(integration)) ||
       !this._integrationManager
         .getAllowedSocialsIntegrations()
         .includes(integration)

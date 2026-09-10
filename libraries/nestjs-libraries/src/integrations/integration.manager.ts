@@ -80,16 +80,33 @@ export const socialIntegrationList: Array<SocialAbstract & SocialProvider> = [
 
 @Injectable()
 export class IntegrationManager {
+  private parseProviderList(value: string | undefined): string[] {
+    return (value || '')
+      .split(',')
+      .map((provider) => provider.trim())
+      .filter(Boolean);
+  }
+
   // Both are env-driven so cloud and self-hosted instances can differ:
+  // ENABLED_PROVIDERS is an optional allowlist for new connections and the
+  // add-channel screen. HIDDEN_PROVIDERS remains a denylist applied after it.
   // HIDDEN_PROVIDERS ("tiktok,x") hides providers from the add-channel screen,
   // MIGRATE_PROVIDERS ("tiktok:tiktok-business") routes a reconnect of the old
   // provider through the new provider's OAuth and migrates the channel in
   // place, keeping its id, scheduled posts and settings.
+  isEnabledProvider(identifier: string) {
+    const configured = process.env.ENABLED_PROVIDERS;
+    if (!configured?.trim()) {
+      return true;
+    }
+
+    return this.parseProviderList(configured).includes(identifier);
+  }
+
   isHiddenProvider(identifier: string) {
-    return (process.env.HIDDEN_PROVIDERS || '')
-      .split(',')
-      .map((p) => p.trim())
-      .includes(identifier);
+    return this.parseProviderList(process.env.HIDDEN_PROVIDERS).includes(
+      identifier
+    );
   }
 
   // Note: a target provider that implements `reConnect` is not supported - the
@@ -129,7 +146,11 @@ export class IntegrationManager {
     return {
       social: await Promise.all(
         socialIntegrationList
-          .filter((p) => !this.isHiddenProvider(p.identifier))
+          .filter(
+            (p) =>
+              this.isEnabledProvider(p.identifier) &&
+              !this.isHiddenProvider(p.identifier)
+          )
           .map(async (p) => ({
             name: p.name,
             identifier: p.identifier,

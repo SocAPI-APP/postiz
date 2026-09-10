@@ -11,6 +11,7 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useDecisionModal } from '@gitroom/frontend/components/layout/new-modal';
 import { DeveloperComponent } from '@gitroom/frontend/components/developer/developer.component';
 import { McpClientIcon } from '@gitroom/frontend/components/public-api/mcp.client.icons';
+import OAuthRedirectUrlsComponent from '@gitroom/frontend/components/settings/oauth-redirect-urls.component';
 import clsx from 'clsx';
 
 // Remote clients can't set headers, they get a URL to paste (hint = where)
@@ -868,7 +869,12 @@ export const PublicComponent = () => {
           </button>
         ))}
       </div>
-      {subTab === 'api' && <PublicApiContent />}
+      {subTab === 'api' && (
+        <>
+          <PublicApiContent />
+          <OAuthRedirectUrlsComponent />
+        </>
+      )}
       {subTab === 'developer' && <DeveloperComponent />}
     </div>
   );

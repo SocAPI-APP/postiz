@@ -106,6 +106,7 @@ services:
 
       # === Developer Settings
       NX_ADD_PLUGINS: false
+      ENABLED_PROVIDERS: '${ENABLED_PROVIDERS:-}'
 
       # === Short Link Service Settings (Optional - leave blank if unused)
       # DUB_TOKEN: ""

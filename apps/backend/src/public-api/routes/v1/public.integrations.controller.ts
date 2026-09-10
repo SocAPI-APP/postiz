@@ -350,6 +350,7 @@ export class PublicIntegrationsController {
   ) {
     Sentry.metrics.count('public_api-request', 1);
     if (
+      (!refresh && !this._integrationManager.isEnabledProvider(integration)) ||
       !this._integrationManager
         .getAllowedSocialsIntegrations()
         .includes(integration)
