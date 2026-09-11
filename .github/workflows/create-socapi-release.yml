@@ -67,6 +67,8 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -84,10 +86,26 @@ jobs:
           fi
           git tag "$VERSION" "$SOURCE_SHA"
           git push origin "$VERSION"
-          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          echo "$GITHUB_TOKEN" | docker login ghcr.io \
+            -u "$GITHUB_ACTOR" \
+            --password-stdin
+
+          echo "$DOCKERHUB_TOKEN" | docker login \
+            -u "$DOCKERHUB_USERNAME" \
+            --password-stdin
+
           docker pull "ghcr.io/socapi-app/postiz:${VERSION}"
-          docker tag "ghcr.io/socapi-app/postiz:${VERSION}" ghcr.io/socapi-app/postiz:latest
+
+          docker tag \
+            "ghcr.io/socapi-app/postiz:${VERSION}" \
+            ghcr.io/socapi-app/postiz:latest
+
+          docker tag \
+            "ghcr.io/socapi-app/postiz:${VERSION}" \
+            socapi/postiz:latest
+
           docker push ghcr.io/socapi-app/postiz:latest
+          docker push socapi/postiz:latest
 
       - name: Notify Telegram - success
         env:

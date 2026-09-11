@@ -149,37 +149,32 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
         run: |
           set -euo pipefail
-          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+          echo "$GITHUB_TOKEN" | docker login ghcr.io \
+            -u "$GITHUB_ACTOR" \
+            --password-stdin
+
+          echo "$DOCKERHUB_TOKEN" | docker login \
+            -u "$DOCKERHUB_USERNAME" \
+            --password-stdin
+
           docker pull "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}"
-          docker tag "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}" ghcr.io/socapi-app/postiz:latest
+
+          docker tag \
+            "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}" \
+            ghcr.io/socapi-app/postiz:latest
+
+          docker tag \
+            "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}" \
+            socapi/postiz:latest
+
           docker push ghcr.io/socapi-app/postiz:latest
-      - name: Notify Telegram - success
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
-          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
-        run: |
-          set -euo pipefail
-
-          message=$(cat <<EOF
-          ✅ Postiz ${UPSTREAM_TAG} a fost integrat cu succes în SocAPI.
-
-          Versiune SocAPI:
-          ${SOCAPI_TAG}
-
-          Imagine:
-          ghcr.io/socapi-app/postiz:${SOCAPI_TAG}
-          EOF
-          )
-
-          curl -fsS -X POST \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${message}"
+          docker push socapi/postiz:latest
 
   notify-failure:
     needs: [check, sync, build, accept]
