@@ -96,17 +96,31 @@ jobs:
           git fetch origin main
           git fetch upstream --tags
           branch="sync/upstream-${UPSTREAM_TAG}"
-          git fetch origin "$branch" || true
-          git checkout -B "$branch" origin/main
-          if ! git merge --no-edit "$UPSTREAM_TAG"; then
-            git merge --abort || true
-            echo "Merge failed for $UPSTREAM_TAG" >&2
-            exit 1
+
+          if git fetch origin "$branch"; then
+            git checkout -B "$branch" "origin/$branch"
+          else
+            git checkout -B "$branch" origin/main
+            git push -u origin "$branch"
           fi
+
+          if ! git merge-base --is-ancestor "$UPSTREAM_TAG" HEAD; then
+            if ! git merge --no-edit "$UPSTREAM_TAG"; then
+              git status --short
+              echo "Merge conflict for $UPSTREAM_TAG on $branch" >&2
+              echo "Resolve the conflict manually, push $branch, then rerun the workflow." >&2
+              exit 1
+            fi
+          fi
+
           printf '%s\n' "$UPSTREAM_TAG" > .socapi-upstream-version
           git add .socapi-upstream-version
-          git commit -m "ci: accept Postiz ${UPSTREAM_TAG}"
-          git push --force-with-lease origin "$branch"
+
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: accept Postiz ${UPSTREAM_TAG}"
+          fi
+
+          git push origin "$branch"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
   build:
