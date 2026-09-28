@@ -3,7 +3,6 @@ import { sanitizePostContent } from '@gitroom/helpers/utils/sanitize.post.conten
 export const dynamic = 'force-dynamic';
 import { Metadata } from 'next';
 import { isGeneralServerSide } from '@gitroom/helpers/utils/is.general.server.side';
-import SafeImage from '@gitroom/react/helpers/safe.image';
 import Link from 'next/link';
 import { CommentsComponents } from '@gitroom/frontend/components/preview/comments.components';
 import dayjs from 'dayjs';
@@ -19,22 +18,18 @@ export const metadata: Metadata = {
   title: `${isGeneralServerSide() ? 'Postiz' : 'Gitroom'} Preview`,
   description: '',
 };
-export default async function Auth(
-  props: {
-    params: Promise<{
-      id: string;
-    }>;
-    searchParams?: Promise<{
-      share?: string;
-    }>;
-  }
-) {
+export default async function Auth(props: {
+  params: Promise<{
+    id: string;
+  }>;
+  searchParams?: Promise<{
+    share?: string;
+  }>;
+}) {
   const searchParams = await props.searchParams;
   const params = await props.params;
 
-  const {
-    id
-  } = params;
+  const { id } = params;
 
   const post = await (await internalFetch(`/public/posts/${id}`)).json();
   const t = await getT();
@@ -51,20 +46,21 @@ export default async function Auth(
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
-              <div className="min-w-[55px]">
+              <div className="flex items-center">
                 <Link
                   href="/"
                   className="text-2xl flex items-center justify-center gap-[10px] text-textColor order-1"
                 >
-                  <div className="max-w-[55px]">
-                    <SafeImage
-                      src={'/postiz.svg'}
-                      width={55}
-                      height={55}
-                      alt="Logo"
+                  <div className="max-w-[32px]">
+                    <img
+                      src="/socapi-icon.png"
+                      width={32}
+                      height={32}
+                      alt="SocAPI"
+                      className="h-[32px] w-[32px] object-contain"
                     />
                   </div>
-                  <div>
+                  <div className="hidden">
                     <svg
                       width="80"
                       height="75"
@@ -90,6 +86,9 @@ export default async function Auth(
                       />
                     </svg>
                   </div>
+                  <span className="text-[26px] font-semibold leading-none tracking-[-0.5px]">
+                    SocAPI
+                  </span>
                 </Link>
               </div>
             </div>
