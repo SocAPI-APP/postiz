@@ -47,7 +47,10 @@ export async function proxy(request: NextRequest) {
     nextUrl.pathname.startsWith('/uploads/') ||
     nextUrl.pathname.startsWith('/p/') ||
     nextUrl.pathname.startsWith('/provider/') ||
-    nextUrl.pathname.startsWith('/icons/')
+    nextUrl.pathname.startsWith('/icons/') ||
+    nextUrl.pathname.startsWith('/api/meta/') ||
+    nextUrl.pathname === '/data-deletion' ||
+    nextUrl.pathname === '/data-deletion/'
   ) {
     return topResponse;
   }

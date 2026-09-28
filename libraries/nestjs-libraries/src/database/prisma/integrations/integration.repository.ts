@@ -69,6 +69,21 @@ export class IntegrationRepository {
     });
   }
 
+  /**
+   * Meta callbacks contain the app-scoped user id but no organization id.
+   * Facebook Page and Facebook-login Instagram channels keep it in
+   * rootInternalId; standalone Instagram and Threads use it as internalId.
+   */
+  findByMetaUser(providerIdentifiers: string[], userId: string) {
+    return this._integration.model.integration.findMany({
+      where: {
+        providerIdentifier: { in: providerIdentifiers },
+        deletedAt: null,
+        OR: [{ rootInternalId: userId }, { internalId: userId }],
+      },
+    });
+  }
+
   async checkPreviousConnections(org: string, id: string) {
     // Deleted accounts keep their integrations with an md5 hashed
     // rootInternalId, so match both the raw id and its hash to still catch

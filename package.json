@@ -37,7 +37,8 @@
     "docker-build": "./var/docker/docker-build.sh",
     "docker-create": "./var/docker/docker-create.sh",
     "postinstall": "pnpm run prisma-generate",
-    "test": "jest --coverage --detectOpenHandles --reporters=default --reporters=jest-junit"
+    "test": "jest --coverage --detectOpenHandles --reporters=default --reporters=jest-junit",
+    "test:meta-callbacks": "vitest run --config vitest.config.ts libraries/nestjs-libraries/src/integrations/meta-callbacks.service.spec.ts apps/backend/src/api/routes/meta-callbacks.controller.spec.ts 'apps/frontend/src/app/(public)/api/meta/meta-callbacks.route.spec.ts'"
   },
   "dependencies": {
     "@ag-ui/mastra": "^1.1.4",

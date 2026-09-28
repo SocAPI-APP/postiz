@@ -56,6 +56,7 @@ import { FarcasterProvider } from '@gitroom/backend/services/auth/providers/farc
 import { WalletProvider } from '@gitroom/backend/services/auth/providers/wallet.provider';
 import { OauthProvider } from '@gitroom/backend/services/auth/providers/oauth.provider';
 import { StripeController } from '@gitroom/backend/api/routes/stripe.controller';
+import { MetaCallbacksController } from '@gitroom/backend/api/routes/meta-callbacks.controller';
 
 const authenticatedController = [
   UsersController,
@@ -100,6 +101,7 @@ const authenticatedController = [
         OAuthController,
         MediaWidgetController,
         ClippingWidgetController,
+        MetaCallbacksController,
         ...authenticatedController,
       ],
   providers: [
