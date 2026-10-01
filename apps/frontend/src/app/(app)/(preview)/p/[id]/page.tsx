@@ -14,6 +14,26 @@ import { RenderPreviewDateClient } from '@gitroom/frontend/components/preview/re
 import { CreationMethodBadge } from '@gitroom/frontend/components/launches/creation.method.badge';
 
 dayjs.extend(utc);
+
+const postStateStyles: Record<string, { badge: string; dot: string }> = {
+  QUEUE: {
+    badge: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+    dot: 'bg-amber-300',
+  },
+  PUBLISHED: {
+    badge: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+    dot: 'bg-emerald-300',
+  },
+  DRAFT: {
+    badge: 'border-slate-400/30 bg-slate-400/10 text-slate-300',
+    dot: 'bg-slate-300',
+  },
+  ERROR: {
+    badge: 'border-red-400/30 bg-red-400/10 text-red-300',
+    dot: 'bg-red-300',
+  },
+};
+
 export const metadata: Metadata = {
   title: `${isGeneralServerSide() ? 'Postiz' : 'Gitroom'} Preview`,
   description: '',
@@ -40,10 +60,18 @@ export default async function Auth(props: {
       </div>
     );
   }
+
+  const state = post[0].state || 'UNKNOWN';
+  const stateStyle = postStateStyles[state] || {
+    badge: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
+    dot: 'bg-sky-300',
+  };
+  const releaseURL = post[0].releaseURL;
+
   return (
     <div>
-      <div className="mx-auto w-full max-w-[1346px] py-3 text-white">
-        <div className="flex items-center justify-between">
+      <div className="mx-auto w-full max-w-[1346px] px-4 py-3 text-white">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               <div className="flex items-center">
@@ -105,9 +133,62 @@ export default async function Auth(props: {
             </div>
           </div>
         </div>
+
+        <div className="mt-3 flex flex-col gap-3 rounded-xl border border-white/10 bg-gradient-to-r from-white/[0.07] to-white/[0.03] p-3 shadow-[0_12px_35px_rgba(0,0,0,0.22)] sm:flex-row sm:items-center sm:px-4">
+          <div className="flex items-center gap-3 sm:pe-5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+              {t('post_status', 'Status')}
+            </span>
+            <span
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold tracking-wide ${stateStyle.badge}`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full shadow-[0_0_8px_currentColor] ${stateStyle.dot}`}
+              />
+              {state}
+            </span>
+          </div>
+
+          <div className="hidden h-8 w-px bg-white/10 sm:block" />
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3 sm:ps-2">
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+              {t('post_url', 'Post URL')}
+            </span>
+            {releaseURL ? (
+              <a
+                href={releaseURL}
+                target="_blank"
+                rel="noreferrer"
+                className="group flex min-w-0 items-center gap-2 text-sm text-sky-300 transition-colors hover:text-sky-200"
+              >
+                <span className="truncate underline decoration-sky-400/30 underline-offset-4 group-hover:decoration-sky-300">
+                  {releaseURL}
+                </span>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4 shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <path d="M14 5h5v5M10 14 19 5M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+                </svg>
+              </a>
+            ) : (
+              <span className="text-sm text-gray-500">
+                {t(
+                  'post_url_available_after_publication',
+                  'Available after publication'
+                )}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row text-white w-full max-w-[1346px] mx-auto">
+      <div className="mx-auto flex w-full max-w-[1346px] flex-col px-4 text-white lg:flex-row">
         <div className="flex-1">
           <div className="gap-[20px] flex flex-col">
             {post.map((p: any, index: number) => (
