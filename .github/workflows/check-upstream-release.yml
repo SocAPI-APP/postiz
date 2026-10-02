@@ -95,43 +95,165 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       branch: ${{ steps.sync.outputs.branch }}
+
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+
       - name: Merge upstream into isolated sync branch
         id: sync
         shell: bash
         env:
           UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
           git config user.name 'SocAPI Upstream Bot'
           git config user.email 'actions@users.noreply.github.com'
+
           git remote add upstream https://github.com/gitroomhq/postiz-app.git
+
           git fetch origin main
-          git fetch upstream --tags
+          git fetch upstream --tags --force
+
           branch="sync/upstream-${UPSTREAM_TAG}"
+          remote_exists=0
+
+          show_conflict() {
+            conflicts="$1"
+            compare_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1"
+            pr_url=""
+
+            if command -v gh >/dev/null 2>&1; then
+              pr_url="$(
+                gh pr list \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --base main \
+                  --head "$branch" \
+                  --state open \
+                  --json url \
+                  --jq '.[0].url // empty' \
+                  2>/dev/null || true
+              )"
+
+              if [ -z "$pr_url" ]; then
+                pr_url="$(
+                  gh pr create \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --base main \
+                    --head "$branch" \
+                    --title "Resolve Postiz ${UPSTREAM_TAG} conflicts" \
+                    --body "Automatic merge failed. Resolve the conflicts on this sync branch, commit the resolution, then rerun Check upstream Postiz release. Do not merge this PR into main manually." \
+                    2>/dev/null || true
+                )"
+              fi
+            fi
+
+            {
+              echo "## Merge conflict: Postiz ${UPSTREAM_TAG}"
+              echo
+              echo "### Conflicting files"
+              echo
+              echo '```text'
+              printf '%s\n' "$conflicts"
+              echo '```'
+              echo
+
+              if [ -n "$pr_url" ]; then
+                echo "### Pull Request"
+                echo
+                echo "$pr_url"
+              else
+                echo "### Create Pull Request"
+                echo
+                echo "$compare_url"
+                echo
+                echo "GitHub Actions could not create the PR automatically."
+              fi
+
+              echo
+              echo "Resolve the conflicts on ${branch}, commit them, then rerun this workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            echo "::error title=Postiz ${UPSTREAM_TAG} merge conflict::Manual conflict resolution is required."
+          }
 
           if git fetch origin "$branch"; then
+            remote_exists=1
             git checkout -B "$branch" "origin/$branch"
           else
             git checkout -B "$branch" origin/main
-            git push -u origin "$branch"
           fi
 
-          if ! git merge-base --is-ancestor "$UPSTREAM_TAG" HEAD; then
+          #
+          # The sync branch already contains this Postiz release.
+          # This normally means that a previous run prepared it
+          # for manual conflict resolution.
+          #
+          if git merge-base --is-ancestor "$UPSTREAM_TAG" HEAD; then
+            echo "${branch} already contains ${UPSTREAM_TAG}"
+
+            #
+            # After manual conflict resolution, main must also
+            # be an ancestor of the sync branch.
+            #
+            if ! git merge-base --is-ancestor origin/main HEAD; then
+              echo "Current main is not yet included in ${branch}."
+              echo "Trying to merge main automatically..."
+
+              if ! git merge --no-edit origin/main; then
+                conflicts="$(git diff --name-only --diff-filter=U)"
+
+                git merge --abort || true
+
+                show_conflict "$conflicts"
+                exit 1
+              fi
+            fi
+
+          else
+            #
+            # Normal automatic update:
+            # start from current SocAPI main and merge new Postiz.
+            #
+            git checkout -B "$branch" origin/main
+
+            echo "Trying automatic merge of ${UPSTREAM_TAG}..."
+
             if ! git merge --no-edit "$UPSTREAM_TAG"; then
-              git status --short
-              echo "Merge conflict for $UPSTREAM_TAG on $branch" >&2
-              echo "Resolve the conflict manually, push $branch, then rerun the workflow." >&2
+              conflicts="$(git diff --name-only --diff-filter=U)"
+
+              git merge --abort || true
+
+              #
+              # Git cannot push an unresolved index.
+              # Put the upstream release itself on the sync branch.
+              # A PR main <- sync branch will then expose the
+              # actual merge conflicts in GitHub.
+              #
+              git checkout -B "$branch" "$UPSTREAM_TAG"
+
+              if [ "$remote_exists" -eq 1 ]; then
+                git push --force-with-lease origin "$branch"
+              else
+                git push -u origin "$branch"
+              fi
+
+              show_conflict "$conflicts"
               exit 1
             fi
           fi
 
+          #
+          # Automatic merge succeeded, or conflicts were already
+          # resolved manually on the sync branch.
+          #
           printf '%s\n' "$UPSTREAM_TAG" > .socapi-upstream-version
+
           git add .socapi-upstream-version
 
           if ! git diff --cached --quiet; then
@@ -139,6 +261,7 @@ jobs:
           fi
 
           git push origin "$branch"
+
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
   build:
