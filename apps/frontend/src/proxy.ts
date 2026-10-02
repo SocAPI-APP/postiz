@@ -48,6 +48,7 @@ export async function proxy(request: NextRequest) {
     nextUrl.pathname.startsWith('/p/') ||
     nextUrl.pathname.startsWith('/provider/') ||
     nextUrl.pathname.startsWith('/icons/') ||
+    nextUrl.pathname.startsWith('/oauth/authorize') ||
     nextUrl.pathname.startsWith('/api/meta/') ||
     nextUrl.pathname === '/data-deletion' ||
     nextUrl.pathname === '/data-deletion/'

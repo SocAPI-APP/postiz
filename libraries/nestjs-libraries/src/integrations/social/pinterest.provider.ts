@@ -128,7 +128,10 @@ export class PinterestProvider
           'Pinterest was unable to reach the URL provided. Please check the link and try again.',
       };
     }
-    if (body.indexOf(`does not match '^\\\\\\\\\\\\\\\\d+$'`) > -1) {
+    if (
+      body.indexOf("does not match '^") > -1 &&
+      body.indexOf("d+$'") > -1
+    ) {
       return {
         type: 'bad-body' as const,
         value:
@@ -139,6 +142,13 @@ export class PinterestProvider
       return {
         type: 'bad-body' as const,
         value: 'The specified board was not found. Please check the board ID.',
+      };
+    }
+    if (body.indexOf('You are not permitted to access that resource') > -1) {
+      return {
+        type: 'bad-body' as const,
+        value:
+          'The connected Pinterest account is not permitted to post to this board. Please check the board ID and that the account owns or can write to the board.',
       };
     }
     if (body.indexOf('cover_image_url or cover_image_content_type') > -1) {
