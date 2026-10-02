@@ -82,6 +82,8 @@ export class EnterpriseController {
       }
 
       if (
+        (!load.refreshId &&
+          !this._integrationManager.isEnabledProvider(load.provider)) ||
         !this._integrationManager
           .getAllowedSocialsIntegrations()
           .includes(load.provider)

@@ -1,0 +1,184 @@
+.shell {
+  --ink: #10231d;
+  --muted: #5d6b66;
+  --line: rgba(16, 35, 29, 0.14);
+  --acid: #d9ff43;
+  --mint: #baf6d8;
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  overflow: hidden;
+  padding: 40px 20px;
+  background: linear-gradient(
+        135deg,
+        rgba(16, 35, 29, 0.04) 25%,
+        transparent 25%
+      )
+      0 0 / 24px 24px,
+    #f1f0e9;
+}
+
+.glow {
+  position: absolute;
+  top: -18vw;
+  right: -10vw;
+  width: 52vw;
+  height: 52vw;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(217, 255, 67, 0.85),
+    rgba(186, 246, 216, 0.2) 48%,
+    transparent 70%
+  );
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.card {
+  position: relative;
+  width: min(100%, 690px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  padding: clamp(28px, 6vw, 58px);
+  background: rgba(255, 255, 251, 0.92);
+  box-shadow: 0 28px 80px rgba(16, 35, 29, 0.14);
+  backdrop-filter: blur(18px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 52px;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.eyebrow {
+  display: inline-flex;
+  margin-bottom: 16px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.card h1 {
+  max-width: 580px;
+  margin: 0 0 24px;
+  font-size: clamp(38px, 8vw, 68px);
+  line-height: 0.98;
+  letter-spacing: -0.065em;
+}
+
+.content {
+  display: grid;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.content p,
+.status p {
+  margin: 0;
+}
+
+.codeBlock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 34px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 15px 18px;
+  background: #f7f7f1;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.codeBlock code {
+  color: var(--ink);
+  font-family: 'Courier New', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.status {
+  display: grid;
+  gap: 10px;
+  border-radius: 20px;
+  padding: 24px;
+}
+
+.completed {
+  background: var(--mint);
+}
+
+.unknown {
+  margin-top: 30px;
+  background: #ffe2b8;
+}
+
+.statusLabel {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.status strong {
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.status p,
+.status time {
+  color: #34463f;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 34px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.footer a {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .shell {
+    align-items: start;
+    padding: 18px 12px;
+  }
+
+  .card {
+    border-radius: 22px;
+  }
+
+  .brand {
+    margin-bottom: 38px;
+  }
+
+  .codeBlock {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

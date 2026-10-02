@@ -15,6 +15,8 @@ import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/o
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
 import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
 import { ShortlinkPreferenceDto } from '@gitroom/nestjs-libraries/dtos/settings/shortlink-preference.dto';
+import { OAuthRedirectUrlsDto } from '@gitroom/nestjs-libraries/dtos/settings/oauth-redirect-urls.dto';
+import { validateRedirectUrl } from '@gitroom/helpers/utils/redirect.url';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
@@ -86,6 +88,32 @@ export class SettingsController {
     return this._organizationService.updateShortlinkPreference(
       org.id,
       body.shortlink
+    );
+  }
+
+  @Get('/oauth-redirect-urls')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async getOAuthRedirectUrls(@GetOrgFromRequest() org: Organization) {
+    return this._organizationService.getAllowedOAuthRedirectUrls(org.id);
+  }
+
+  @Post('/oauth-redirect-urls')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async updateOAuthRedirectUrls(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: OAuthRedirectUrlsDto
+  ) {
+    const urls = [...new Set(body.urls.map((url) => validateRedirectUrl(url)))];
+    if (urls.some((url) => !url)) {
+      throw new HttpException(
+        'All OAuth redirect URLs must be absolute HTTP or HTTPS URLs without credentials',
+        400
+      );
+    }
+
+    return this._organizationService.updateAllowedOAuthRedirectUrls(
+      org.id,
+      urls as string[]
     );
   }
 }

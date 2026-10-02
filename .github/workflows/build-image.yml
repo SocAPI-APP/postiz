@@ -1,0 +1,53 @@
+name: Build SocAPI Postiz image
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Source branch, tag, or commit to build
+        required: true
+        type: string
+      image_tag:
+        description: Version tag to publish to GHCR and Docker Hub
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push versioned image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.dev
+          push: true
+          tags: |
+            ghcr.io/socapi-app/postiz:${{ inputs.image_tag }}
+            socapi/postiz:${{ inputs.image_tag }}

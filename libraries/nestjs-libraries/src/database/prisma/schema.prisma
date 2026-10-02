@@ -21,6 +21,7 @@ model Organization {
   allowTrial          Boolean              @default(false)
   isTrailing          Boolean              @default(false)
   shortlink           ShortLinkPreference  @default(ASK)
+  allowedOAuthRedirectUrls String[]         @default([])
   autoPost            AutoPost[]
   Comments            Comments[]
   credits             Credits[]

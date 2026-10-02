@@ -1,0 +1,359 @@
+name: Check upstream Postiz release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.compare.outputs.new_release }}
+      upstream_tag: ${{ steps.upstream.outputs.tag }}
+      current_tag: ${{ steps.current.outputs.tag }}
+      socapi_tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Get latest upstream release
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_url="$(
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --output /dev/null \
+              --write-out '%{url_effective}' \
+              https://github.com/gitroomhq/postiz-app/releases/latest
+          )"
+
+          tag="${latest_url##*/}"
+
+          if [ -z "$tag" ] || [ "$tag" = "latest" ]; then
+            echo 'Could not determine latest upstream release' >&2
+            exit 1
+          fi
+
+          echo "Latest upstream release: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Read accepted upstream version
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=""
+          [ -f .socapi-upstream-version ] && current="$(tr -d '[:space:]' < .socapi-upstream-version)"
+          echo "tag=$current" >> "$GITHUB_OUTPUT"
+      - name: Compare releases
+        id: compare
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          CURRENT_TAG: ${{ steps.current.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$UPSTREAM_TAG" = "$CURRENT_TAG" ]; then
+            echo 'new_release=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'new_release=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Calculate and verify release version
+        id: version
+        if: steps.compare.outputs.new_release == 'true'
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          tag="${UPSTREAM_TAG}-socapi-v1"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git show-ref --tags --verify --quiet "refs/tags/$tag"; then
+            echo "SocAPI tag already exists: $tag" >&2
+            exit 1
+          fi
+
+  sync:
+    needs: check
+    if: needs.check.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.sync.outputs.branch }}
+
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream into isolated sync branch
+        id: sync
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name 'SocAPI Upstream Bot'
+          git config user.email 'actions@users.noreply.github.com'
+
+          git remote add upstream https://github.com/gitroomhq/postiz-app.git
+
+          git fetch origin main
+          git fetch upstream --tags --force
+
+          branch="sync/upstream-${UPSTREAM_TAG}"
+          remote_exists=0
+
+          show_conflict() {
+            conflicts="$1"
+            compare_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1"
+            pr_url=""
+
+            if command -v gh >/dev/null 2>&1; then
+              pr_url="$(
+                gh pr list \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --base main \
+                  --head "$branch" \
+                  --state open \
+                  --json url \
+                  --jq '.[0].url // empty' \
+                  2>/dev/null || true
+              )"
+
+              if [ -z "$pr_url" ]; then
+                pr_url="$(
+                  gh pr create \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --base main \
+                    --head "$branch" \
+                    --title "Resolve Postiz ${UPSTREAM_TAG} conflicts" \
+                    --body "Automatic merge failed. Resolve the conflicts on this sync branch, commit the resolution, then rerun Check upstream Postiz release. Do not merge this PR into main manually." \
+                    2>/dev/null || true
+                )"
+              fi
+            fi
+
+            {
+              echo "## Merge conflict: Postiz ${UPSTREAM_TAG}"
+              echo
+              echo "### Conflicting files"
+              echo
+              echo '```text'
+              printf '%s\n' "$conflicts"
+              echo '```'
+              echo
+
+              if [ -n "$pr_url" ]; then
+                echo "### Pull Request"
+                echo
+                echo "$pr_url"
+              else
+                echo "### Create Pull Request"
+                echo
+                echo "$compare_url"
+                echo
+                echo "GitHub Actions could not create the PR automatically."
+              fi
+
+              echo
+              echo "Resolve the conflicts on ${branch}, commit them, then rerun this workflow."
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            echo "::error title=Postiz ${UPSTREAM_TAG} merge conflict::Manual conflict resolution is required."
+          }
+
+          if git fetch origin "$branch"; then
+            remote_exists=1
+            git checkout -B "$branch" "origin/$branch"
+          else
+            git checkout -B "$branch" origin/main
+          fi
+
+          #
+          # The sync branch already contains this Postiz release.
+          # This normally means that a previous run prepared it
+          # for manual conflict resolution.
+          #
+          if git merge-base --is-ancestor "$UPSTREAM_TAG" HEAD; then
+            echo "${branch} already contains ${UPSTREAM_TAG}"
+
+            #
+            # After manual conflict resolution, main must also
+            # be an ancestor of the sync branch.
+            #
+            if ! git merge-base --is-ancestor origin/main HEAD; then
+              echo "Current main is not yet included in ${branch}."
+              echo "Trying to merge main automatically..."
+
+              if ! git merge --no-edit origin/main; then
+                conflicts="$(git diff --name-only --diff-filter=U)"
+
+                git merge --abort || true
+
+                show_conflict "$conflicts"
+                exit 1
+              fi
+            fi
+
+          else
+            #
+            # Normal automatic update:
+            # start from current SocAPI main and merge new Postiz.
+            #
+            git checkout -B "$branch" origin/main
+
+            echo "Trying automatic merge of ${UPSTREAM_TAG}..."
+
+            if ! git merge --no-edit "$UPSTREAM_TAG"; then
+              conflicts="$(git diff --name-only --diff-filter=U)"
+
+              git merge --abort || true
+
+              #
+              # Git cannot push an unresolved index.
+              # Put the upstream release itself on the sync branch.
+              # A PR main <- sync branch will then expose the
+              # actual merge conflicts in GitHub.
+              #
+              git checkout -B "$branch" "$UPSTREAM_TAG"
+
+              if [ "$remote_exists" -eq 1 ]; then
+                git push --force-with-lease origin "$branch"
+              else
+                git push -u origin "$branch"
+              fi
+
+              show_conflict "$conflicts"
+              exit 1
+            fi
+          fi
+
+          #
+          # Automatic merge succeeded, or conflicts were already
+          # resolved manually on the sync branch.
+          #
+          printf '%s\n' "$UPSTREAM_TAG" > .socapi-upstream-version
+
+          git add .socapi-upstream-version
+
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: accept Postiz ${UPSTREAM_TAG}"
+          fi
+
+          git push origin "$branch"
+
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [check, sync]
+    if: needs.check.outputs.new_release == 'true' && needs.sync.result == 'success'
+    uses: ./.github/workflows/build-image.yml
+    with:
+      source_ref: ${{ needs.sync.outputs.branch }}
+      image_tag: ${{ needs.check.outputs.socapi_tag }}
+    secrets: inherit
+
+  accept:
+    needs: [check, sync, build]
+    if: needs.check.outputs.new_release == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge tested sync branch into main and tag it
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
+        run: |
+          set -euo pipefail
+          git clone --no-tags "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git config user.name 'SocAPI Upstream Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git fetch origin main "sync/upstream-${UPSTREAM_TAG}"
+          git checkout -B main origin/main
+          git merge --ff-only "origin/sync/upstream-${UPSTREAM_TAG}"
+          git push origin main
+          if git ls-remote --exit-code --tags origin "refs/tags/$SOCAPI_TAG" >/dev/null 2>&1; then
+            echo "SocAPI tag already exists: $SOCAPI_TAG" >&2
+            exit 1
+          fi
+          git tag "$SOCAPI_TAG" HEAD
+          git push origin "$SOCAPI_TAG"
+      - name: Promote accepted image to latest
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
+        run: |
+          set -euo pipefail
+
+          echo "$GITHUB_TOKEN" | docker login ghcr.io \
+            -u "$GITHUB_ACTOR" \
+            --password-stdin
+
+          echo "$DOCKERHUB_TOKEN" | docker login \
+            -u "$DOCKERHUB_USERNAME" \
+            --password-stdin
+
+          docker pull "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}"
+
+          docker tag \
+            "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}" \
+            ghcr.io/socapi-app/postiz:latest
+
+          docker tag \
+            "ghcr.io/socapi-app/postiz:${SOCAPI_TAG}" \
+            socapi/postiz:latest
+
+          docker push ghcr.io/socapi-app/postiz:latest
+          docker push socapi/postiz:latest
+
+  notify-failure:
+    needs: [check, sync, build, accept]
+    if: always() && needs.check.outputs.new_release == 'true' && (needs.sync.result != 'success' || needs.build.result != 'success' || needs.accept.result != 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Telegram - failure
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream_tag }}
+          SOCAPI_TAG: ${{ needs.check.outputs.socapi_tag }}
+          CHECK_RESULT: ${{ needs.check.result }}
+          SYNC_RESULT: ${{ needs.sync.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          if [ "$CHECK_RESULT" != success ]; then
+            detail="Versiunea SocAPI ${SOCAPI_TAG:-calculată} nu a putut fi rezervată. Tag-ul Git nu a fost creat."
+          elif [ "$SYNC_RESULT" != success ]; then
+            detail="Merge-ul pentru Postiz ${UPSTREAM_TAG} a eșuat. Main nu a fost modificat."
+          elif [ "$BUILD_RESULT" != success ]; then
+            detail="Build-ul pentru ${SOCAPI_TAG} a eșuat. Main și latest nu au fost modificate."
+          else
+            detail="Acceptarea versiunii ${SOCAPI_TAG} a eșuat. Verificarea manuală este necesară."
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode "text=❌ ${detail}"
